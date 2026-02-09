@@ -29,9 +29,7 @@ Example:
 
 Add to your `.env` file:
 
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=
+you will need account sid, auth token, and phone number in your .env file.
 
 **Phone Number Format:** Must be in E.164 format:
 - US: `+1234567890`
