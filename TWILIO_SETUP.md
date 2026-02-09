@@ -29,11 +29,9 @@ Example:
 
 Add to your `.env` file:
 
-```bash
-TWILIO_ACCOUNT_SID=<Twilio_secret>
-TWILIO_AUTH_TOKEN=your-auth-token-here
-TWILIO_PHONE_NUMBER=+1234567890
-```
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
 
 **Phone Number Format:** Must be in E.164 format:
 - US: `+1234567890`
