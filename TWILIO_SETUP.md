@@ -30,7 +30,7 @@ Example:
 Add to your `.env` file:
 
 ```bash
-TWILIO_ACCOUNT_SID=AC1234567890abcdef1234567890abcdef
+TWILIO_ACCOUNT_SID=<Twilio_secret>
 TWILIO_AUTH_TOKEN=your-auth-token-here
 TWILIO_PHONE_NUMBER=+1234567890
 ```
