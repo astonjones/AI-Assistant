@@ -34,8 +34,13 @@ const oauth2Client = new google.auth.OAuth2(
   callbackUrl + callbackPath
 );
 
-// Generate auth URL
-const scopes = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/calendar'];
+/*
+// scopes for later:
+'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'
+*/
+
+// Generate auth URL with required scopes
+const scopes = ['https://www.googleapis.com/auth/calendar'];
 const authUrl = oauth2Client.generateAuthUrl({
   access_type: 'offline',
   scope: scopes,

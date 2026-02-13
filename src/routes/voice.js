@@ -17,10 +17,7 @@ router.post('/incoming', (req, res) => {
   try {
     const { CallSid, From, To } = req.body;
 
-    console.log('📞 Incoming call received:');
-    console.log(`  Call SID: ${CallSid}`);
-    console.log(`  From: ${From}`);
-    console.log(`  To: ${To}`);
+    console.log(`📞 Incoming: ${From} → ${To} (${CallSid})`);
 
     // Create TwiML response
     const twiml = new VoiceResponse();
@@ -37,15 +34,11 @@ router.post('/incoming', (req, res) => {
     const wsUrl = baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
     const streamUrl = `${wsUrl}/voice/stream`;
     
-    console.log(`🔌 Configuring MediaStream:`);
-    console.log(`   Original URL: ${baseUrl}`);
-    console.log(`   WebSocket URL: ${streamUrl}`);
-    console.log(`   Call SID: ${CallSid}`);
-    
-    twiml.connect().stream({
-      url: streamUrl,
-      name: `call-${CallSid}`
-    });
+    // Create stream connection with parameters
+    const connect = twiml.connect();
+    const stream = connect.stream({ url: streamUrl });
+    stream.parameter({ name: 'from', value: From });
+    stream.parameter({ name: 'to', value: To });
 
     // Keep the call active while streaming
     twiml.pause({ length: 900 }); // 15 minutes pause to allow streaming to continue

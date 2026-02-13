@@ -1,10 +1,13 @@
 /**
- * Twilio Service Functions
- * Function definitions for OpenAI function calling
+ * Twilio Tools
+ * Tool definitions (schemas only) for OpenAI function calling
+ * 
+ * NOTE: Handlers are implemented in functionHandler.js
  */
 
-const twilioFunctions = [
+const twilioTools = [
   {
+    type: 'function',
     name: 'send_sms',
     description: 'Send an SMS text message to a phone number. Use when user asks to send, text, or message someone via SMS.',
     parameters: {
@@ -23,6 +26,7 @@ const twilioFunctions = [
     }
   },
   {
+    type: 'function',
     name: 'list_sms_history',
     description: 'Retrieve recent SMS messages (both sent and received). Use when user asks to check texts, messages, or SMS history.',
     parameters: {
@@ -38,4 +42,4 @@ const twilioFunctions = [
   }
 ];
 
-module.exports = twilioFunctions;
+module.exports = { twilioTools };

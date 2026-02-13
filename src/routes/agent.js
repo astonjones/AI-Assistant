@@ -1,9 +1,9 @@
 const express = require('express');
 const { chat } = require('../services/openai');
-const emailService = require('../services/email');
-const emailFunctions = require('../services/functions/emailFunctions');
-const twilioFunctions = require('../services/functions/twilioFunctions');
-const calendarFunctions = require('../services/functions/calendarFunctions');
+const { emailTools } = require('../services/openaiTools/emailTools');
+const { twilioTools } = require('../services/openaiTools/twilioTools');
+const { calendarTools } = require('../services/openaiTools/calendarTools');
+const { databaseTools } = require('../services/openaiTools/databaseTools');
 const { processToolCalls, hasToolCalls } = require('../services/functionHandler');
 const router = express.Router();
 
@@ -17,10 +17,11 @@ const router = express.Router();
  *   - prompt: String (alternative to messages)
  *   - model: Model name (default: gpt-4-turbo)
  *   - temperature: Temperature (default: 0.7)
- *   - tools: Array of function names to enable (default: ['email', 'twilio', 'calendar'])
+ *   - tools: Array of function names to enable (default: ['email', 'twilio', 'calendar', 'database'])
  *     Available: 'email' (send_email, read_emails, summarize_emails)
  *                'twilio' (send_sms, list_sms_history)
  *                'calendar' (list_events, create_event, update_event, delete_event)
+ *                'database' (update_caller_name)
  * 
  * Examples:
  *   { "prompt": "Send john@example.com an email", "tools": ["email"] }
@@ -34,7 +35,7 @@ router.put('/', async (req, res) => {
       model = 'gpt-4-turbo', 
       messages, 
       temperature = 0.7,
-      tools = ['email', 'twilio', 'calendar']
+      tools = ['email', 'twilio', 'calendar', 'database']
     } = req.body;
 
     // Convert prompt to messages if needed
@@ -49,13 +50,16 @@ router.put('/', async (req, res) => {
     // Build available tools based on requested types
     let availableTools = [];
     if (tools.includes('email')) {
-      availableTools = [...availableTools, ...emailFunctions];
+      availableTools = [...availableTools, ...emailTools];
     }
     if (tools.includes('twilio')) {
-      availableTools = [...availableTools, ...twilioFunctions];
+      availableTools = [...availableTools, ...twilioTools];
     }
     if (tools.includes('calendar')) {
-      availableTools = [...availableTools, ...calendarFunctions];
+      availableTools = [...availableTools, ...calendarTools];
+    }
+    if (tools.includes('database')) {
+      availableTools = [...availableTools, ...databaseTools];
     }
 
     // Call OpenAI with function definitions

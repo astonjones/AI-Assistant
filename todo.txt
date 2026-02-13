@@ -1,0 +1,45 @@
+Future Features:
+- Database integration
+    - Application will lookup each number in the database, if there is history then prompt accordingly. Else create new db entry.
+
+- Make Initial prompt user editable via an API or implement a user friendly design to edit this. We want to make it easy to deploy these agents with other use case.
+
+- Authentication
+    - I need to find a way to authenticate all the API requests. I can't have just anyone hitting my server without the proper permissions. FIgure out a simple and cheap design.
+
+- Implement easy notification to admin user
+    - We need to summarize calls in post, and let the primary admin user know these summarizations. Probably via text or telegram.
+
+- Easy deployment
+    - Figure where to have this application hosted.
+
+
+Vision
+Lets get an MVP in place for my business. What would that look like?
+1.) Implement Postgresql db - production ready
+2.) Figure out Authentication design.
+3.) Containerize application.
+4.) Create prompt for Property Management/Personal Use
+4.) Deploy via AWS?
+5.) Forward Number to new bot via Twilio Config
+6.) Update divinationhomes website
+
+Step 4.) Repeat process - deploy bot for AI Automation business.
+    - AI Phone system
+    - AI data Management
+    - AI Coding solutions
+    - AI Chatbots
+!! This bot can do anything as long as you gift it tools to do so !!
+
+For personal:
+- screen calls and sweep out spam. Replaces voicemail and brings messages to me.
+- Potentially texts when calls are missed.
+- Respond to emails
+- Hook up statements and have easy accountant for personal expenses.
+
+For business use:
+- Property Management
+    - Keeps up with tenants and regularly checks in with them.
+    - Potentially reach out to thumbtack/existing contractors for maintenance
+    - Answers calls and directs tenant prospects & schedules appointment.
+    - Keeps up with income and expenses.

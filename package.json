@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Express API that forwards requests to OpenAI chat completions",
   "main": "src/index.js",
   "scripts": {
@@ -14,6 +14,8 @@
     "dotenv": "^16.0.0",
     "express": "^4.18.2",
     "googleapis": "^118.0.0",
+    "pg": "^8.11.3",
+    "sql.js": "^1.13.0",
     "twilio": "^4.10.0",
     "ws": "^8.19.0"
   },

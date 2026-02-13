@@ -6,6 +6,7 @@
 
 const WebSocket = require('ws');
 const EventEmitter = require('events');
+const toolsService = require('./tools');
 
 class RealtimeService extends EventEmitter {
   constructor() {
@@ -34,9 +35,6 @@ class RealtimeService extends EventEmitter {
       throw new Error('OpenAI API key not configured. Add OPENAI_API_KEY to .env');
     }
 
-    console.log(`🤖 Creating OpenAI Realtime session for call: ${callSid}`);
-    console.log(`   Connecting to: ${this.openaiUrl}`);
-
     try {
       const ws = new WebSocket(this.openaiUrl, {
         headers: {
@@ -51,8 +49,10 @@ class RealtimeService extends EventEmitter {
         isConnected: false,
         sessionId: null,
         transcription: '',
+        currentAIResponse: '', // Track the current AI response text being assembled
         audioBuffer: [],
         startTime: new Date(),
+        pendingToolCall: null, // Track tool call in progress { name, arguments }
         stats: {
           audioChunksSent: 0,
           audioChunksReceived: 0,
@@ -62,7 +62,6 @@ class RealtimeService extends EventEmitter {
 
       // Handle connection open
       ws.on('open', () => {
-        console.log(`✅ OpenAI Realtime connected for call: ${callSid}`);
         session.isConnected = true;
 
         // Send session creation message with system prompt
@@ -76,7 +75,8 @@ class RealtimeService extends EventEmitter {
             output_audio_format: 'g711_ulaw',
             input_audio_transcription: {
               model: 'whisper-1'
-            }
+            },
+            tools: toolsService.getTools()
           }
         };
 
@@ -172,11 +172,10 @@ class RealtimeService extends EventEmitter {
 
     // Only log important OpenAI API events
     if (messageType === 'session.created') {
-      console.log(`📋 OpenAI session created: ${message.session.id}`);
       session.sessionId = message.session.id;
     }
     else if (messageType === 'session.updated') {
-      console.log(`📋 OpenAI session configured`);
+      // Session configured
     }
     else if (messageType === 'conversation.item.created') {
       // User audio was captured, but transcription comes later via input_audio_transcription.completed
@@ -185,7 +184,6 @@ class RealtimeService extends EventEmitter {
       // This is where the actual user transcription comes through
       const transcript = message.transcript;
       if (transcript) {
-        console.log(`👤 User: "${transcript}"`);
         session.transcription = transcript;
         
         this.emit('user-transcription', {
@@ -198,12 +196,6 @@ class RealtimeService extends EventEmitter {
     else if (messageType === 'response.audio.delta') {
       session.stats.audioChunksReceived++;
       const audioData = message.delta;
-      
-      console.log(`🔊 Audio delta received:`);
-      console.log(`   Size: ${audioData?.length || 'unknown'}`);
-      console.log(`   Data type: ${typeof audioData}`);
-      console.log(`   First 50 chars: ${audioData?.substring(0, 50)}`);
-      console.log(`   Is base64: ${/^[A-Za-z0-9+/=]+$/.test(audioData?.substring(0, 50))}`);
 
       this.emit('response-audio', {
         callSid,
@@ -223,7 +215,16 @@ class RealtimeService extends EventEmitter {
         const error = statusDetails?.error?.message || 'Unknown error';
         console.error(`❌ OpenAI Response Failed: ${error}`);
       } else if (status === 'completed' && message.response?.output && message.response.output.length > 0) {
-        console.log(`🤖 AI response sent to caller`);
+        // Emit the full AI response text if we have it
+        if (session.currentAIResponse) {
+          this.emit('assistant-transcript', {
+            callSid,
+            text: session.currentAIResponse,
+            timestamp: new Date()
+          });
+          session.currentAIResponse = ''; // Reset for next response
+        }
+        
         this.emit('response-complete', {
           callSid,
           response: message.response.output[0],
@@ -234,6 +235,56 @@ class RealtimeService extends EventEmitter {
     else if (messageType === 'response.text.delta') {
       if (message.delta) {
         console.log(`📝 AI response: ${message.delta}`);
+        // Accumulate the AI response text
+        session.currentAIResponse += message.delta;
+      }
+    }
+    else if (messageType === 'response.output_item.added') {
+      // A new output item was added (could be function call or message)
+      const item = message.item;
+      if (item && item.type === 'function_call') {
+        // Initialize pending tool call with the function name
+        session.pendingToolCall = {
+          name: item.name || '',
+          callId: item.call_id || '',
+          arguments: ''
+        };
+      }
+    }
+    else if (messageType === 'response.function_call_arguments.delta') {
+      // Accumulate function call arguments
+      if (!session.pendingToolCall) {
+        session.pendingToolCall = {
+          name: message.name || '',
+          arguments: ''
+        };
+      }
+      if (message.delta) {
+        session.pendingToolCall.arguments += message.delta;
+      }
+    }
+    else if (messageType === 'response.function_call_arguments.done') {
+      // Tool call is complete - parse arguments and execute
+      if (session.pendingToolCall) {
+        const toolName = session.pendingToolCall.name;
+        let toolArgs = {};
+        
+        try {
+          toolArgs = JSON.parse(session.pendingToolCall.arguments);
+        } catch (err) {
+          console.error(`❌ Failed to parse tool arguments:`, err.message);
+        }
+        
+        // Emit event for index.js to execute the tool
+        this.emit('tool-call', {
+          callSid,
+          toolName,
+          toolArgs,
+          callId: session.pendingToolCall.callId, // Include call_id for response
+          session // Pass session so we can send result back
+        });
+
+        // Don't reset pendingToolCall yet - we need the callId for the response
       }
     }
     else if (messageType === 'error') {
@@ -248,6 +299,105 @@ class RealtimeService extends EventEmitter {
     // These are informational and don't need logging
 
     session.stats.messagesReceived++;
+  }
+
+  /**
+   * Send tool result back to OpenAI
+   * Called after a tool has been executed to provide the result to the AI
+   * @param {string} callSid - Call SID
+   * @param {string} callId - Function call ID from OpenAI
+   * @param {object} result - Result from tool execution { success, result, error }
+   */
+  sendToolResult(callSid, callId, result) {
+    const session = this.sessions.get(callSid);
+    if (!session || !session.ws || session.ws.readyState !== WebSocket.OPEN) {
+      console.error(`❌ Cannot send tool result - session not found or WebSocket closed`);
+      return;
+    }
+
+    // Format the result as a string for OpenAI
+    let resultText;
+    if (result.success) {
+      // Convert result to string - handle arrays and objects
+      if (typeof result.result === 'string') {
+        resultText = result.result;
+      } else if (Array.isArray(result.result)) {
+        // Format array results - check if it's calendar events for better formatting
+        if (result.result.length === 0) {
+          resultText = 'No items found.';
+        } else if (result.result[0]?.summary && result.result[0]?.start) {
+          // Calendar events - format in natural language
+          resultText = this._formatCalendarEvents(result.result);
+        } else {
+          // Other arrays - use JSON
+          resultText = JSON.stringify(result.result, null, 2);
+        }
+      } else if (typeof result.result === 'object') {
+        resultText = JSON.stringify(result.result, null, 2);
+      } else {
+        resultText = String(result.result);
+      }
+    } else {
+      resultText = `Error: ${result.error}`;
+    }
+
+    const message = {
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: callId,
+        output: resultText
+      }
+    };
+
+    try {
+      session.ws.send(JSON.stringify(message));
+      console.log(`📤 Sent tool result to OpenAI (call_id: ${callId})`);
+      
+      // Clear pending tool call after successful response
+      session.pendingToolCall = null;
+    } catch (err) {
+      console.error(`❌ Failed to send tool result:`, err.message);
+    }
+  }
+
+  /**
+   * Format calendar events in natural language for the AI
+   * @private
+   */
+  _formatCalendarEvents(events) {
+    if (!events || events.length === 0) {
+      return 'No calendar events found.';
+    }
+
+    const eventStrings = events.map((event, index) => {
+      const eventNum = index + 1;
+      const date = new Date(event.start);
+      const dateStr = date.toLocaleString('en-US', { 
+        weekday: 'long',
+        month: 'long', 
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short'
+      });
+      
+      let eventText = `${eventNum}. "${event.summary}" on ${dateStr}`;
+      
+      if (event.location) {
+        eventText += ` at ${event.location}`;
+      }
+      
+      if (event.description) {
+        eventText += `. Description: ${event.description}`;
+      }
+      
+      return eventText;
+    });
+
+    const summary = `Found ${events.length} event${events.length > 1 ? 's' : ''}:\n\n${eventStrings.join('\n\n')}`;
+    return summary;
   }
 
   /**

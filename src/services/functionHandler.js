@@ -6,6 +6,7 @@
 const emailService = require('./email');
 const twilioService = require('./twilio');
 const calendarService = require('./calendar');
+const databaseService = require('./database.auto');
 const { summarizeEmailsByUrgency, generateEmailReport } = require('./emailProcessor');
 
 /**
@@ -130,6 +131,32 @@ const functionMap = {
     }
     
     return await calendarService.deleteEvent(eventId);
+  },
+
+  update_caller_name: async (params, phone) => {
+    const { name } = params;
+    
+    // Validate required parameter
+    if (!name) {
+      throw new Error('Missing required parameter: name');
+    }
+    
+    if (!phone) {
+      throw new Error('Phone number not available - cannot update caller');
+    }
+    
+    // Update the caller's name in the database
+    const result = await databaseService.updateCallerName(phone, name);
+    
+    // Return the result from database service
+    if (result.success) {
+      return {
+        success: true,
+        message: `Saved your name as "${name}"`
+      };
+    } else {
+      throw new Error(result.error || 'Failed to save name');
+    }
   }
 };
 
@@ -137,9 +164,10 @@ const functionMap = {
  * Execute a function call from OpenAI
  * @param {string} functionName - Name of the function to call
  * @param {object} params - Function parameters
+ * @param {string} phone - Optional phone number context for certain functions
  * @returns {object} Function result
  */
-async function executeFunction(functionName, params) {
+async function executeFunction(functionName, params, phone = null) {
   const func = functionMap[functionName];
   
   if (!func) {
@@ -147,7 +175,8 @@ async function executeFunction(functionName, params) {
   }
   
   try {
-    const result = await func(params);
+    // Pass phone number to functions that need it (like update_caller_name)
+    const result = await func(params, phone);
     return {
       success: true,
       result: result

@@ -274,22 +274,11 @@ class TwilioService extends EventEmitter {
    * @param {string} streamSid - Twilio stream SID for this media update
    */
   sendMediaUpdate(ws, audioBase64, streamSid) {
-    if (!ws) {
-      console.error('❌ WebSocket is null');
-      return;
-    }
-
-    console.log(`   📊 WebSocket state: ${ws.readyState} (0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)`);
-
-    if (ws.readyState !== 1) { // 1 = OPEN
-      console.warn(`⚠️  WebSocket not ready (state: ${ws.readyState}). Message will not be sent.`);
+    if (!ws || ws.readyState !== 1) {
       return;
     }
 
     try {
-      // The audio comes from OpenAI as a base64 string in g711_ulaw format
-      // Twilio expects the payload to remain as base64 string for MediaStream
-      
       const mediaUpdate = {
         event: 'media',
         streamSid: streamSid,
@@ -298,19 +287,9 @@ class TwilioService extends EventEmitter {
         }
       };
 
-      const jsonStr = JSON.stringify(mediaUpdate);
-      console.log(`   📤 Sending media update:`);
-      console.log(`      - Event: media`);
-      console.log(`      - StreamSid: ${streamSid}`);
-      console.log(`      - Track: outbound`);
-      console.log(`      - Payload size: ${audioBase64?.length || 0} chars (base64)`);
-      console.log(`      - Total message size: ${jsonStr.length} bytes`);
-
-      ws.send(jsonStr);
-      console.log(`   ✅ Media update sent successfully`);
+      ws.send(JSON.stringify(mediaUpdate));
     } catch (err) {
-      console.error(`   ❌ Error sending media update to Twilio: ${err.message}`);
-      console.error(`   Stack:`, err.stack);
+      console.error(`❌ Error sending audio: ${err.message}`);
     }
   }
 }

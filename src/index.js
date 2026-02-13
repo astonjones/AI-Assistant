@@ -9,8 +9,10 @@ const authRoutes = require('./routes/auth');
 const voiceRoutes = require('./routes/voice');
 const smsRoutes = require('./routes/sms');
 const webhookRoutes = require('./routes/webhooks');
+const databaseRoutes = require('./routes/database');
 const twilioService = require('./services/twilio');
 const realtimeService = require('./services/realtime');
+const dbService = require('./services/database.auto');
 
 const app = express();
 app.use(cors());
@@ -23,10 +25,14 @@ app.use('/auth', authRoutes);
 app.use('/voice', voiceRoutes);
 app.use('/sms', smsRoutes);
 app.use('/webhooks', webhookRoutes);
+app.use('/database', databaseRoutes);
 
 // Create HTTP server to support WebSocket
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/voice/stream' });
+
+// Track conversation metadata by callSid
+const conversationStates = new Map();
 
 // Log WebSocket server startup
 console.log(`📡 WebSocket server configured on path: /voice/stream`);
@@ -36,15 +42,13 @@ console.log(`📡 WebSocket server configured on path: /voice/stream`);
  * Proxies audio between Twilio and OpenAI Realtime API
  */
 wss.on('connection', (ws, req) => {
-  console.log('🔌 WebSocket connection established from client');
-  
   let callSid = null;
   let streamSid = null;
   let openaiSession = null;
   let audioCommitTimer = null;
   const COMMIT_INTERVAL = 500; // Commit audio buffer every 500ms
 
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     try {
       // Parse the incoming message (JSON format from Twilio)
       const message = JSON.parse(data);
@@ -53,17 +57,65 @@ wss.on('connection', (ws, req) => {
       if (message.event === 'start') {
         callSid = message.start.callSid;
         streamSid = message.start.streamSid;
-        console.log(`\n📡 STREAM STARTED - Call SID: ${callSid}`);
         
-        // Initialize the Twilio stream tracking with both callSid and streamSid
+        // Extract phone numbers from customParameters
+        const customParams = message.start.customParameters || {};
+        const toNumber = customParams.to || 'Unknown';
+        const fromNumber = customParams.from;
+        
+        if (!fromNumber) {
+          console.error('❌ No phone number found in stream parameters!');
+          console.error('customParameters:', customParams);
+          ws.close();
+          return;
+        }
+        
+        console.log(`📞 Call: ${fromNumber} → ${toNumber} (${callSid})`);
+
+        // ✅ Register Twilio stream so OpenAI can send audio back
         twilioService.initializeStream(callSid, streamSid, ws);
 
-        // Create OpenAI Realtime session for this call
-        console.log(`🔄 Creating OpenAI Realtime session...`);
-        realtimeService.createSession(callSid)
+        // ✅ Ensure database is ready before using it
+        await dbService.ensureReady();
+
+        // Database: Record caller and conversation
+        const caller = await dbService.upsertCaller(fromNumber);
+        const conversation = await dbService.createConversation(callSid, fromNumber);
+        if (conversation) {
+          conversationStates.set(callSid, {
+            callSid,
+            phone: fromNumber,
+            conversationId: conversation.id,
+            startTime: new Date()
+          });
+        }
+
+        // Get caller's previous conversation history for context injection
+        const previousHistory = await dbService.getConversationHistory(fromNumber, 3);
+        let contextMsg = '';
+        if (previousHistory && previousHistory.length > 0) {
+          contextMsg = `Note: This caller has called ${previousHistory.length} time(s) before.`;
+          if (caller?.name) {
+            contextMsg += ` Their name is ${caller.name}.`;
+          } else {
+            contextMsg += ` You should ask for their name and remember it using the update_caller_name tool.`;
+          }
+        }
+
+        // Define a system prompt for the AI
+        const systemPrompt = 
+        `You are a helpful and friendly AI assistant on a phone call.
+        Respond to the caller's questions and requests in a clear and concise manner.
+        Always be polite and professional.
+        
+        IMPORTANT: When you learn the caller's name (either they tell you or you ask), IMMEDIATELY call the update_caller_name tool to save it.
+        If you already know their name from a previous conversation, greet them by name.
+        ${contextMsg}`;
+        
+        // Create OpenAI Realtime session
+        realtimeService.createSession(callSid, systemPrompt)
           .then((session) => {
             openaiSession = session;
-            console.log(`✨ OpenAI Realtime session connected for call ${callSid}`);
           })
           .catch(err => {
             console.error(`❌ FAILED to create OpenAI session: ${err.message}`);
@@ -125,8 +177,14 @@ wss.on('connection', (ws, req) => {
       else if (message.event === 'stop') {
         console.log(`\n⏹️  STREAM STOPPED - Call SID: ${callSid}`);
         if (callSid) {
+          // Database: End conversation
+          dbService.endConversation(callSid);
+          
           twilioService.closeStream(callSid);
           realtimeService.closeSession(callSid);
+          
+          // Clean up conversation state
+          conversationStates.delete(callSid);
           console.log(`✅ Cleaned up stream and session`);
         }
       }
@@ -152,16 +210,20 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    console.log(`\n🔌 WebSocket connection closed - Call SID: ${callSid || 'unknown'}`);
     if (callSid) {
+      console.log(`📞 Call ended: ${callSid}`);
+      dbService.endConversation(callSid);
+      conversationStates.delete(callSid);
       twilioService.closeStream(callSid);
       realtimeService.closeSession(callSid);
     }
   });
 
   ws.on('error', (err) => {
-    console.error(`\n❌ WebSocket error for call ${callSid || 'unknown'}:`, err.message);
+    console.error(`❌ WebSocket error: ${err.message}`);
     if (callSid) {
+      dbService.endConversation(callSid);
+      conversationStates.delete(callSid);
       twilioService.closeStream(callSid);
       realtimeService.closeSession(callSid);
     }
@@ -178,28 +240,14 @@ wss.on('connection', (ws, req) => {
 realtimeService.on('response-audio', ({ callSid, audio }) => {
   const streamData = twilioService.getStream(callSid);
   
-  if (!streamData) {
-    console.error(`   ❌ Stream not found for call: ${callSid}`);
+  if (!streamData || !streamData.ws || !streamData.streamSid) {
     return;
   }
-  
-  if (!streamData.ws) {
-    console.error(`   ❌ WebSocket not found in stream for call: ${callSid}`);
-    return;
-  }
-  
-  if (!streamData.streamSid) {
-    console.error(`   ❌ Stream SID not found in stream data for call: ${callSid}`);
-    return;
-  }
-
-  console.log(`📤 Routing audio response to Twilio (${audio?.length || 0} bytes, base64)`);
   
   try {
-    // Send audio back to Twilio using the correct streamSid
     twilioService.sendMediaUpdate(streamData.ws, audio, streamData.streamSid);
   } catch (err) {
-    console.error(`   ❌ Error sending audio to Twilio: ${err.message}`);
+    console.error(`❌ Error sending audio: ${err.message}`);
   }
 });
 
@@ -207,21 +255,45 @@ realtimeService.on('response-audio', ({ callSid, audio }) => {
  * Log user transcriptions from OpenAI
  */
 realtimeService.on('user-transcription', ({ callSid, text }) => {
-  console.log(`📝 [${callSid}] User said: "${text}"`);
+  console.log(`� User: "${text}"`);
+  dbService.logMessage(callSid, 'user', text);
 });
 
 /**
- * Log when AI response completes
+ * Log AI transcripts from OpenAI
  */
-realtimeService.on('response-complete', ({ callSid }) => {
-  console.log(`✅ [${callSid}] AI response complete`);
+realtimeService.on('assistant-transcript', ({ callSid, text }) => {
+  console.log(`🤖 AI: "${text}"`);
+  dbService.logMessage(callSid, 'assistant', text);
 });
 
 /**
- * Handle OpenAI errors
+ * Handle tool calls from OpenAI
  */
-realtimeService.on('openai-error', ({ callSid, error }) => {
-  console.error(`❌ [${callSid}] OpenAI error:`, error);
+realtimeService.on('tool-call', async ({ callSid, toolName, toolArgs, callId, session }) => {
+  console.log(`🔧 ${toolName}(${JSON.stringify(toolArgs)})`);
+  
+  // Get caller phone from conversation state
+  const convState = conversationStates.get(callSid);
+  const phone = convState?.phone;
+
+  if (!phone) {
+    console.error(`❌ Cannot execute tool - phone number not found`);
+    realtimeService.sendToolResult(callSid, callId, {
+      success: false,
+      error: 'Internal error: phone number not found'
+    });
+    return;
+  }
+
+  // Import toolsService here to avoid circular dependencies
+  const toolsService = require('./services/tools');
+
+  // Execute the tool
+  const result = await toolsService.executeTool(toolName, toolArgs, phone);
+  
+  // Send result back to OpenAI
+  realtimeService.sendToolResult(callSid, callId, result);
 });
 
 // Log WebSocket server errors
@@ -229,10 +301,16 @@ wss.on('error', (err) => {
   console.error(`❌ WebSocket server error:`, err.message);
 });
 
-server.listen(process.env.PORT || 3000, () => {
-  const publicUrl = process.env.NGROK_URL;
-  if (publicUrl) {
-    console.log(`🚀 Public URL: ${publicUrl}`);
-  }
-  console.log(`📱 Voice stream endpoint: ${publicUrl || 'http://localhost:3000'}/voice/stream`);
-});
+// Start server after database is ready
+(async () => {
+  await dbService.ensureReady();
+  console.log('✅ Database initialized and ready');
+  
+  server.listen(process.env.PORT || 3000, () => {
+    const publicUrl = process.env.NGROK_URL;
+    if (publicUrl) {
+      console.log(`🚀 Public URL: ${publicUrl}`);
+    }
+    console.log(`📱 Voice stream endpoint: ${publicUrl || 'http://localhost:3000'}/voice/stream`);
+  });
+})();

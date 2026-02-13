@@ -1,10 +1,13 @@
 /**
- * Calendar Service Functions
- * Function definitions for OpenAI function calling
+ * Calendar Tools
+ * Tool definitions (schemas only) for OpenAI function calling
+ * 
+ * NOTE: Handlers are implemented in functionHandler.js
  */
 
-const calendarFunctions = [
+const calendarTools = [
   {
+    type: 'function',
     name: 'list_events',
     description: 'List upcoming calendar events. Use this when the user asks to view, check, or list calendar events.',
     parameters: {
@@ -23,6 +26,7 @@ const calendarFunctions = [
     }
   },
   {
+    type: 'function',
     name: 'create_event',
     description: 'Create a new calendar event. Use this when the user asks to schedule, add, or create an event.',
     parameters: {
@@ -53,6 +57,7 @@ const calendarFunctions = [
     }
   },
   {
+    type: 'function',
     name: 'update_event',
     description: 'Update an existing calendar event. Use this when the user asks to edit, modify, or reschedule an event.',
     parameters: {
@@ -87,6 +92,7 @@ const calendarFunctions = [
     }
   },
   {
+    type: 'function',
     name: 'delete_event',
     description: 'Delete a calendar event. Use this when the user asks to remove, cancel, or delete an event.',
     parameters: {
@@ -102,4 +108,4 @@ const calendarFunctions = [
   }
 ];
 
-module.exports = calendarFunctions;
+module.exports = { calendarTools };
