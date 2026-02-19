@@ -1,18 +1,52 @@
-# API Reference - After Cleanup
+ # API Reference
 
-## All Endpoints
+## Endpoints
 
-### Health & Status
+---
+
+### Health
 ```
 GET /health
-  └─ Server health check
 ```
+Returns server status and uptime.
+
+---
 
 ### AI Agent
 ```
 PUT /agent
-  ├─ Body: { prompt, tools: ["email", "twilio", "calendar"] }
-  └─ AI agent with function calling
+```
+Main agentic endpoint. OpenAI runs in a loop, calling tools until the task is done.
+
+**Body**
+```json
+{
+  "prompt": "Send John an email and text him too",
+  "tools": ["email", "twilio", "calendar", "database", "telegram"],
+  "model": "gpt-4-turbo",
+  "temperature": 0.7
+}
+```
+Either `prompt` (string) or `messages` (array) is required. `tools` defaults to all five groups if omitted.
+
+**Tool groups**
+
+| Key | Functions exposed to the AI |
+|---|---|
+| `email` | `send_email`, `read_emails`, `summarize_emails` |
+| `twilio` | `send_sms`, `list_sms_history`, `hang_up_call` |
+| `calendar` | `list_events`, `create_event`, `update_event`, `delete_event` |
+| `database` | `update_caller_name` |
+| `telegram` | `send_telegram_message`, `summarize_and_send_telegram`, `send_telegram_summary` |
+
+**Response**
+```json
+{
+  "choices": [...],
+  "model": "gpt-4-turbo",
+  "usage": { "prompt_tokens": 0, "completion_tokens": 0 },
+  "toolCalls": [...]
+}
 ```
 
 ### Authentication

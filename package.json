@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-api",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Express API that forwards requests to OpenAI chat completions",
   "main": "src/index.js",
   "scripts": {
