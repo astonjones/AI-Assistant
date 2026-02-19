@@ -4,6 +4,7 @@ const { emailTools } = require('../services/openaiTools/emailTools');
 const { twilioTools } = require('../services/openaiTools/twilioTools');
 const { calendarTools } = require('../services/openaiTools/calendarTools');
 const { databaseTools } = require('../services/openaiTools/databaseTools');
+const { telegramTools } = require('../services/openaiTools/telegramTools');
 const { processToolCalls, hasToolCalls } = require('../services/functionHandler');
 const router = express.Router();
 
@@ -22,12 +23,14 @@ const router = express.Router();
  *                'twilio' (send_sms, list_sms_history)
  *                'calendar' (list_events, create_event, update_event, delete_event)
  *                'database' (update_caller_name)
+ *                'telegram' (send_telegram_message, summarize_and_send_telegram, send_telegram_summary)
  * 
  * Examples:
  *   { "prompt": "Send john@example.com an email", "tools": ["email"] }
  *   { "prompt": "Text 555-1234 about the event", "tools": ["twilio"] }
  *   { "prompt": "Schedule a meeting for tomorrow at 2pm", "tools": ["calendar"] }
  *   { "prompt": "Email and text the team, then create a calendar event", "tools": ["email", "twilio", "calendar"] }
+ *   { "prompt": "Summarize this conversation and send it to me on Telegram", "tools": ["telegram"], "messages": [...] }
  */
 router.put('/', async (req, res) => {
   try {
@@ -35,7 +38,7 @@ router.put('/', async (req, res) => {
       model = 'gpt-4-turbo', 
       messages, 
       temperature = 0.7,
-      tools = ['email', 'twilio', 'calendar', 'database']
+      tools = ['email', 'twilio', 'calendar', 'database', 'telegram']
     } = req.body;
 
     // Convert prompt to messages if needed
@@ -60,6 +63,9 @@ router.put('/', async (req, res) => {
     }
     if (tools.includes('database')) {
       availableTools = [...availableTools, ...databaseTools];
+    }
+    if (tools.includes('telegram')) {
+      availableTools = [...availableTools, ...telegramTools];
     }
 
     // Call OpenAI with function definitions

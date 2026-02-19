@@ -11,6 +11,7 @@ const { databaseTools } = require('./openaiTools/databaseTools');
 const { calendarTools } = require('./openaiTools/calendarTools');
 const { emailTools } = require('./openaiTools/emailTools');
 const { twilioTools } = require('./openaiTools/twilioTools');
+const { telegramTools } = require('./openaiTools/telegramTools');
 
 // Import the actual function implementations
 const { executeFunction } = require('./functionHandler');
@@ -22,7 +23,8 @@ class ToolsService {
       ...databaseTools,
       ...calendarTools,
       ...emailTools,
-      ...twilioTools
+      ...twilioTools,
+      ...telegramTools
     ];
 
     console.log(`✅ Tools service initialized with ${this.tools.length} available tools`);
@@ -43,9 +45,9 @@ class ToolsService {
    * @param {string} phone - Optional phone number context
    * @returns {Promise<object>} { success, result, error }
    */
-  async executeTool(name, args, phone = null) {
+  async executeTool(name, args, phone = null, callSid = null) {
     try {
-      const result = await executeFunction(name, args, phone);
+      const result = await executeFunction(name, args, phone, callSid);
       return result;
     } catch (err) {
       console.error(`❌ Tool execution error (${name}):`, err.message);

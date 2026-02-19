@@ -7,6 +7,7 @@ const emailService = require('./email');
 const twilioService = require('./twilio');
 const calendarService = require('./calendar');
 const databaseService = require('./database.auto');
+const telegramService = require('./telegram');
 const { summarizeEmailsByUrgency, generateEmailReport } = require('./emailProcessor');
 
 /**
@@ -64,6 +65,15 @@ const functionMap = {
     }
     
     return await twilioService.sendSMS(to, body);
+  },
+
+  hang_up_call: async (params, phone, callSid) => {
+    if (!callSid) {
+      throw new Error('No active call SID available to hang up.');
+    }
+    const reason = params?.reason || 'hang up requested';
+    console.log(`📵 AI requested hang-up (${reason}) for call ${callSid}`);
+    return await twilioService.hangUp(callSid);
   },
 
   list_sms_history: async (params) => {
@@ -133,6 +143,48 @@ const functionMap = {
     return await calendarService.deleteEvent(eventId);
   },
 
+  // ── Telegram ──────────────────────────────────────────────────────────────
+
+  send_telegram_message: async (params) => {
+    const { text, chat_id } = params;
+
+    if (!text || !text.trim()) {
+      throw new Error('Missing required parameter: text');
+    }
+
+    return await telegramService.sendMessage(text, chat_id || null);
+  },
+
+  summarize_and_send_telegram: async (params) => {
+    const { messages, context_label, chat_id } = params;
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new Error('Missing required parameter: messages (must be a non-empty array)');
+    }
+
+    return await telegramService.sendConversationSummary(
+      messages,
+      context_label || 'conversation',
+      chat_id || null
+    );
+  },
+
+  send_telegram_summary: async (params) => {
+    const { summary, title, chat_id } = params;
+
+    if (!summary || !summary.trim()) {
+      throw new Error('Missing required parameter: summary');
+    }
+
+    return await telegramService.sendFormattedSummary(
+      summary,
+      title || 'Summary',
+      chat_id || null
+    );
+  },
+
+  // ── Database ──────────────────────────────────────────────────────────────
+
   update_caller_name: async (params, phone) => {
     const { name } = params;
     
@@ -167,7 +219,7 @@ const functionMap = {
  * @param {string} phone - Optional phone number context for certain functions
  * @returns {object} Function result
  */
-async function executeFunction(functionName, params, phone = null) {
+async function executeFunction(functionName, params, phone = null, callSid = null) {
   const func = functionMap[functionName];
   
   if (!func) {
@@ -175,8 +227,8 @@ async function executeFunction(functionName, params, phone = null) {
   }
   
   try {
-    // Pass phone number to functions that need it (like update_caller_name)
-    const result = await func(params, phone);
+    // Pass phone and callSid to functions that need them
+    const result = await func(params, phone, callSid);
     return {
       success: true,
       result: result

@@ -175,7 +175,8 @@ class RealtimeService extends EventEmitter {
       session.sessionId = message.session.id;
     }
     else if (messageType === 'session.updated') {
-      // Session configured
+      // Session is fully configured — signal that the AI is ready to speak first
+      this.emit('session-ready', { callSid });
     }
     else if (messageType === 'conversation.item.created') {
       // User audio was captured, but transcription comes later via input_audio_transcription.completed
@@ -401,14 +402,33 @@ class RealtimeService extends EventEmitter {
   }
 
   /**
+   * Trigger the AI to open the conversation by sending response.create.
+   * Call this once, immediately after the session is confirmed ready.
+   * @param {string} callSid
+   */
+  triggerGreeting(callSid) {
+    const session = this.sessions.get(callSid);
+    if (!session || !session.isConnected) {
+      console.warn(`triggerGreeting: no active session for ${callSid}`);
+      return;
+    }
+
+    try {
+      session.ws.send(JSON.stringify({ type: 'response.create' }));
+      console.log(`🎙️  AI greeting triggered for call ${callSid}`);
+    } catch (err) {
+      console.error(`Failed to trigger greeting for ${callSid}:`, err.message);
+    }
+  }
+
+  /**
    * Get default system prompt for voice assistant
    * @private
    */
   _getDefaultSystemPrompt() {
-    return `You are a helpful voice assistant. You are having a phone conversation. 
-    Be concise, natural, and friendly. Respond to the user's questions and requests.
-    Keep responses brief and conversational - this is a phone call, not a text chat.
-    Avoid long responses. Aim for responses under 30 seconds when spoken aloud.`;
+    return `You are Maya, a professional and warm AI assistant answering missed calls on behalf of Aston.
+    A caller has just reached voicemail. Open the conversation immediately with a natural, friendly greeting.
+    Be concise and professional at all times.`;
   }
 
   /**

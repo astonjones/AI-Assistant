@@ -19,39 +19,27 @@ router.post('/incoming', (req, res) => {
 
     console.log(`📞 Incoming: ${From} → ${To} (${CallSid})`);
 
-    // Create TwiML response
     const twiml = new VoiceResponse();
 
-    // Greet the caller
-    twiml.say({
-      voice: 'alice'
-    }, 'Hello! You have reached the AI Assistant. Your call is being connected now.');
-
-    // Start the media stream
-    // The audio will be sent to the WebSocket URL
-    // Convert https:// to wss:// for WebSocket Secure
+    // Start the media stream immediately — no pre-recorded greeting.
+    // OpenAI Realtime will open the conversation once the WebSocket session is ready.
     const baseUrl = process.env.NGROK_URL;
     const wsUrl = baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
     const streamUrl = `${wsUrl}/voice/stream`;
-    
-    // Create stream connection with parameters
+
     const connect = twiml.connect();
     const stream = connect.stream({ url: streamUrl });
     stream.parameter({ name: 'from', value: From });
     stream.parameter({ name: 'to', value: To });
 
-    // Keep the call active while streaming
-    twiml.pause({ length: 900 }); // 15 minutes pause to allow streaming to continue
-
-    // Set response content type and send
     res.type('application/xml');
     res.send(twiml.toString());
   } catch (err) {
     console.error('Error handling incoming call:', err);
-    
+
     const twiml = new VoiceResponse();
     twiml.say('Sorry, there was an error. Please try again later.');
-    
+
     res.type('application/xml');
     res.send(twiml.toString());
   }

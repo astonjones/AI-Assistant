@@ -267,6 +267,34 @@ class TwilioService extends EventEmitter {
   }
 
   /**
+   * Hang up an active call via the Twilio REST API.
+   * Triggers a Twilio 'stop' stream event which causes normal cleanup.
+   * @param {string} callSid - The Twilio Call SID to end
+   * @returns {Promise<object>} Confirmation object
+   */
+  async hangUp(callSid) {
+    if (!this.isConfigured()) {
+      throw new Error('Twilio not configured. Cannot hang up call.');
+    }
+
+    if (!callSid) {
+      throw new Error('Missing required parameter: callSid');
+    }
+
+    try {
+      await this.client.calls(callSid).update({ status: 'completed' });
+      console.log(`📵 Call ${callSid} ended via REST API`);
+      return {
+        success: true,
+        callSid,
+        message: 'Call has been ended'
+      };
+    } catch (err) {
+      throw new Error(`Failed to hang up call ${callSid}: ${err.message}`);
+    }
+  }
+
+  /**
    * Send audio data back to Twilio for playback to caller
    * Used by OpenAI Realtime API to send AI responses
    * @param {WebSocket} ws - WebSocket connection to Twilio MediaStream

@@ -39,6 +39,23 @@ const twilioTools = [
         }
       }
     }
+  },
+  {
+    type: 'function',
+    name: 'hang_up_call',
+    description:
+      'End the current phone call immediately. ' +
+      'Use when the caller asks to hang up, says goodbye and the conversation is clearly finished, ' +
+      'or when you need to terminate the call for any reason.',
+    parameters: {
+      type: 'object',
+      properties: {
+        reason: {
+          type: 'string',
+          description: 'Optional brief reason for ending the call, e.g. "caller requested", "conversation complete".'
+        }
+      }
+    }
   }
 ];
 

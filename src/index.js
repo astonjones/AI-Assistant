@@ -12,6 +12,7 @@ const webhookRoutes = require('./routes/webhooks');
 const databaseRoutes = require('./routes/database');
 const twilioService = require('./services/twilio');
 const realtimeService = require('./services/realtime');
+const telegramService = require('./services/telegram');
 const dbService = require('./services/database.auto');
 
 const app = express();
@@ -33,6 +34,31 @@ const wss = new WebSocket.Server({ server, path: '/voice/stream' });
 
 // Track conversation metadata by callSid
 const conversationStates = new Map();
+
+/**
+ * Send an AI-generated conversation summary to Telegram after a call ends.
+ * Safe to call from both the 'stop' event and ws.on('close') - guarded by summarySent flag.
+ * @param {string} callSid
+ */
+async function sendCallSummaryToTelegram(callSid) {
+  const state = conversationStates.get(callSid);
+  if (!state || state.summarySent || !state.messages || state.messages.length === 0) return;
+
+  // Mark immediately to prevent double-send (stop + close can both fire)
+  state.summarySent = true;
+
+  try {
+    const durationSecs = Math.floor((new Date() - state.startTime) / 1000);
+    await telegramService.sendVoicemailSummary(
+      state.messages,
+      state.phone,
+      durationSecs
+    );
+    console.log(`💬 Telegram voicemail summary sent for call ${callSid}`);
+  } catch (err) {
+    console.error(`⚠️  Failed to send Telegram call summary for ${callSid}:`, err.message);
+  }
+}
 
 // Log WebSocket server startup
 console.log(`📡 WebSocket server configured on path: /voice/stream`);
@@ -86,32 +112,54 @@ wss.on('connection', (ws, req) => {
             callSid,
             phone: fromNumber,
             conversationId: conversation.id,
-            startTime: new Date()
+            startTime: new Date(),
+            messages: [],        // accumulates { role, content } for post-call summary
+            summarySent: false   // guards against double-sending
           });
         }
 
         // Get caller's previous conversation history for context injection
         const previousHistory = await dbService.getConversationHistory(fromNumber, 3);
-        let contextMsg = '';
-        if (previousHistory && previousHistory.length > 0) {
-          contextMsg = `Note: This caller has called ${previousHistory.length} time(s) before.`;
-          if (caller?.name) {
-            contextMsg += ` Their name is ${caller.name}.`;
-          } else {
-            contextMsg += ` You should ask for their name and remember it using the update_caller_name tool.`;
-          }
-        }
 
         // Define a system prompt for the AI
-        const systemPrompt = 
-        `You are a helpful and friendly AI assistant on a phone call.
-        Respond to the caller's questions and requests in a clear and concise manner.
-        Always be polite and professional.
-        
-        IMPORTANT: When you learn the caller's name (either they tell you or you ask), IMMEDIATELY call the update_caller_name tool to save it.
-        If you already know their name from a previous conversation, greet them by name.
-        ${contextMsg}`;
-        
+        const callerContext = caller?.name
+          ? `You already know this caller — their name is ${caller.name}. Address them by name.`
+          : previousHistory && previousHistory.length > 0
+            ? `This caller has called ${previousHistory.length} time(s) before but has not given their name yet. Ask for it early in the conversation and save it with update_caller_name.`
+            : `This is a first-time caller. Ask for their name early and save it with update_caller_name.`;
+
+        const systemPrompt =
+`You are Maya, a professional and friendly AI assistant answering missed calls on behalf of Aston.
+Aston is unavailable — you are here to take a message and pass it on.
+
+OPENING:
+As soon as the session starts you will be prompted to speak first.
+Greet the caller naturally, for example:
+"Hi, this is Maya, Aston's assistant. He's not available right now — can I take a message or help you with something?"
+Vary the phrasing slightly each call so it never sounds scripted.
+
+CALLER CONTEXT:
+${callerContext}
+
+CORE BEHAVIOUR:
+- Keep every response SHORT — this is a phone call, not a meeting. One or two sentences max.
+- Your job is to take a clear message: who is calling, why they called, and any callback number or email if they offer one.
+- Once you have a complete message, let the caller know Aston will be in touch, say a warm goodbye, then IMMEDIATELY call hang_up_call.
+- If the caller says they don't need to leave a message or says goodbye, wrap up politely and call hang_up_call right away.
+- Never keep a caller waiting or pad out the conversation unnecessarily.
+
+SPAM & BOT DETECTION:
+- If the caller is silent for more than a few seconds after your greeting, call hang_up_call.
+- If the first thing you hear is clearly automated (robocall script, silence-then-beep, sales bot preamble, political recording, etc.), call hang_up_call immediately without engaging.
+- If at any point you are certain you are talking to a bot or automated system, call hang_up_call.
+- A short polite "Sorry, we don't accept automated calls" before hanging up is fine but optional — speed is the priority.
+
+NAME SAVING:
+- When you learn the caller's name, call update_caller_name immediately.
+
+TIME LIMIT:
+- If the conversation exceeds roughly 3 minutes without a clear end, politely let the caller know you have their message and end the call with hang_up_call.`;
+
         // Create OpenAI Realtime session
         realtimeService.createSession(callSid, systemPrompt)
           .then((session) => {
@@ -177,6 +225,9 @@ wss.on('connection', (ws, req) => {
       else if (message.event === 'stop') {
         console.log(`\n⏹️  STREAM STOPPED - Call SID: ${callSid}`);
         if (callSid) {
+          // Send Telegram summary before cleanup removes state
+          await sendCallSummaryToTelegram(callSid);
+
           // Database: End conversation
           dbService.endConversation(callSid);
           
@@ -212,10 +263,13 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     if (callSid) {
       console.log(`📞 Call ended: ${callSid}`);
-      dbService.endConversation(callSid);
-      conversationStates.delete(callSid);
-      twilioService.closeStream(callSid);
-      realtimeService.closeSession(callSid);
+      // Fire summary if not already sent by the 'stop' event handler above
+      sendCallSummaryToTelegram(callSid).finally(() => {
+        dbService.endConversation(callSid);
+        conversationStates.delete(callSid);
+        twilioService.closeStream(callSid);
+        realtimeService.closeSession(callSid);
+      });
     }
   });
 
@@ -233,6 +287,14 @@ wss.on('connection', (ws, req) => {
 // ════════════════════════════════════════════════════════
 // OpenAI Realtime → Twilio Audio Routing
 // ════════════════════════════════════════════════════════
+/**
+ * Once the OpenAI session is fully configured, trigger the AI to speak first.
+ * This replaces the old robotic TwiML greeting.
+ */
+realtimeService.on('session-ready', ({ callSid }) => {
+  realtimeService.triggerGreeting(callSid);
+});
+
 /**
  * Listen for audio responses from OpenAI Realtime API
  * Forward them back to Twilio for playback to caller
@@ -255,8 +317,10 @@ realtimeService.on('response-audio', ({ callSid, audio }) => {
  * Log user transcriptions from OpenAI
  */
 realtimeService.on('user-transcription', ({ callSid, text }) => {
-  console.log(`� User: "${text}"`);
+  console.log(`🗣️ User: "${text}"`);
   dbService.logMessage(callSid, 'user', text);
+  const state = conversationStates.get(callSid);
+  if (state) state.messages.push({ role: 'user', content: text });
 });
 
 /**
@@ -265,6 +329,8 @@ realtimeService.on('user-transcription', ({ callSid, text }) => {
 realtimeService.on('assistant-transcript', ({ callSid, text }) => {
   console.log(`🤖 AI: "${text}"`);
   dbService.logMessage(callSid, 'assistant', text);
+  const state = conversationStates.get(callSid);
+  if (state) state.messages.push({ role: 'assistant', content: text });
 });
 
 /**
@@ -289,8 +355,8 @@ realtimeService.on('tool-call', async ({ callSid, toolName, toolArgs, callId, se
   // Import toolsService here to avoid circular dependencies
   const toolsService = require('./services/tools');
 
-  // Execute the tool
-  const result = await toolsService.executeTool(toolName, toolArgs, phone);
+  // Execute the tool, passing callSid so hang_up_call can reach it
+  const result = await toolsService.executeTool(toolName, toolArgs, phone, callSid);
   
   // Send result back to OpenAI
   realtimeService.sendToolResult(callSid, callId, result);
