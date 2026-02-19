@@ -44,16 +44,33 @@ async function sendCallSummaryToTelegram(callSid) {
   const state = conversationStates.get(callSid);
   if (!state || state.summarySent || !state.messages || state.messages.length === 0) return;
 
-  // Mark immediately to prevent double-send (stop + close can both fire)
   state.summarySent = true;
 
   try {
     const durationSecs = Math.floor((new Date() - state.startTime) / 1000);
-    await telegramService.sendVoicemailSummary(
+
+    // Load the existing rolling summary so we can merge it with this call
+    const previousSummary = dbService.getCallerSummary
+      ? await Promise.resolve(dbService.getCallerSummary(state.phone))
+      : null;
+
+    // Generate new rolling summary and send to Telegram
+    const result = await telegramService.sendVoicemailSummary(
       state.messages,
       state.phone,
-      durationSecs
+      durationSecs,
+      null,           // chatId — uses TELEGRAM_CHAT_ID
+      previousSummary // merged into the rolling summary
     );
+
+    // Persist the updated rolling summary back to the caller record
+    if (result?.summary) {
+      if (dbService.updateCallerSummary) {
+        await Promise.resolve(dbService.updateCallerSummary(state.phone, result.summary));
+        console.log(`💾 Caller summary updated for ${state.phone}`);
+      }
+    }
+
     console.log(`💬 Telegram voicemail summary sent for call ${callSid}`);
   } catch (err) {
     console.error(`⚠️  Failed to send Telegram call summary for ${callSid}:`, err.message);
@@ -119,8 +136,11 @@ wss.on('connection', (ws, req) => {
           });
         }
 
-        // Get caller's previous conversation history for context injection
+        // Get caller's previous conversation history + rolling summary for context injection
         const previousHistory = await dbService.getConversationHistory(fromNumber, 3);
+        const callerSummary = dbService.getCallerSummary
+          ? await Promise.resolve(dbService.getCallerSummary(fromNumber))
+          : null;
 
         // Define a system prompt for the AI
         const callerContext = caller?.name
@@ -129,12 +149,16 @@ wss.on('connection', (ws, req) => {
             ? `This caller has called ${previousHistory.length} time(s) before but has not given their name yet. Ask for it early in the conversation and save it with update_caller_name.`
             : `This is a first-time caller. Ask for their name early and save it with update_caller_name.`;
 
+        const historySection = callerSummary
+          ? `CALLER HISTORY (from previous calls):
+${callerSummary}
+
+Use this to personalise the conversation. Reference prior context naturally if relevant.`
+          : '';
+
         const systemPrompt =
 `You are Maya, a professional and friendly AI assistant answering missed calls on behalf of Aston.
 Aston is unavailable — you are here to take a message and pass it on.
-
-LANGUAGE:
-Always respond in English only, regardless of what language the caller speaks.
 
 OPENING:
 As soon as the session starts you will be prompted to speak first.
@@ -144,6 +168,7 @@ Vary the phrasing slightly each call so it never sounds scripted.
 
 CALLER CONTEXT:
 ${callerContext}
+${historySection ? '\n' + historySection : ''}
 
 CORE BEHAVIOUR:
 - Keep every response SHORT — this is a phone call, not a meeting. One or two sentences max.

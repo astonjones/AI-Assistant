@@ -72,11 +72,17 @@ class DatabaseService extends EventEmitter {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         phone TEXT UNIQUE NOT NULL,
         name TEXT,
+        summary TEXT,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         lastCallAt DATETIME,
         callCount INTEGER DEFAULT 0
       )
     `);
+
+    // summary column added in v2 - safe to run on existing databases
+    try {
+      this.db.run(`ALTER TABLE callers ADD COLUMN summary TEXT`);
+    } catch (_) { /* column already exists - ignore */ }
 
     // Conversations table - tracks individual calls
     this.db.run(`
@@ -235,6 +241,38 @@ class DatabaseService extends EventEmitter {
       this.saveToFile();
     } catch (err) {
       console.error(`❌ Database error (logMessage): ${err.message}`);
+    }
+  }
+
+  /**
+   * Get the rolling caller summary
+   * @param {string} phone
+   * @returns {string|null}
+   */
+  getCallerSummary(phone) {
+    try {
+      const stmt = this.db.prepare('SELECT summary FROM callers WHERE phone = ?');
+      stmt.bind([phone]);
+      const row = stmt.step() ? stmt.getAsObject() : null;
+      stmt.free();
+      return row?.summary || null;
+    } catch (err) {
+      console.error(`❌ Database error (getCallerSummary): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Overwrite the rolling summary for a caller
+   * @param {string} phone
+   * @param {string} summary
+   */
+  updateCallerSummary(phone, summary) {
+    try {
+      this.db.run('UPDATE callers SET summary = ? WHERE phone = ?', [summary, phone]);
+      this.saveToFile();
+    } catch (err) {
+      console.error(`❌ Database error (updateCallerSummary): ${err.message}`);
     }
   }
 

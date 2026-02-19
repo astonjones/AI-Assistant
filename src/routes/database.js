@@ -142,4 +142,33 @@ router.get('/conversation/:callSid', async (req, res) => {
   }
 });
 
+/**
+ * GET /database/conversation/:callSid/messages
+ * Get all messages for a specific conversation (shorthand URL)
+ */
+router.get('/conversation/:callSid/messages', async (req, res) => {
+  try {
+    await dbService.ensureReady();
+    const messages = dbService.getConversationMessages(req.params.callSid);
+    res.json({ success: true, count: messages.length, messages });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /database/caller/:phone/summary
+ * Get the rolling summary stored for a specific caller
+ */
+router.get('/caller/:phone/summary', async (req, res) => {
+  try {
+    await dbService.ensureReady();
+    const summary = await Promise.resolve(dbService.getCallerSummary(req.params.phone));
+    if (!summary) return res.status(404).json({ success: false, error: 'No summary found for this caller' });
+    res.json({ success: true, phone: req.params.phone, summary });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

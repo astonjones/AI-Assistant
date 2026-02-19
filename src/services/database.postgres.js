@@ -59,6 +59,7 @@ class DatabaseService {
         id SERIAL PRIMARY KEY,
         phone VARCHAR(20) UNIQUE NOT NULL,
         name VARCHAR(255),
+        summary TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -86,6 +87,11 @@ class DatabaseService {
     `;
 
     await this.pool.query(schema);
+
+    // summary column added in v2 - safe migration for existing databases
+    try {
+      await this.pool.query(`ALTER TABLE callers ADD COLUMN IF NOT EXISTS summary TEXT`);
+    } catch (_) { /* already exists */ }
   }
 
   /**
@@ -224,6 +230,40 @@ class DatabaseService {
       );
     } catch (err) {
       console.error(`❌ Database error (logMessage): ${err.message}`);
+    }
+  }
+
+  /**
+   * Get the rolling caller summary
+   * @param {string} phone
+   * @returns {string|null}
+   */
+  async getCallerSummary(phone) {
+    try {
+      const result = await this.pool.query(
+        'SELECT summary FROM callers WHERE phone = $1',
+        [phone]
+      );
+      return result.rows[0]?.summary || null;
+    } catch (err) {
+      console.error(`❌ Database error (getCallerSummary): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Overwrite the rolling summary for a caller
+   * @param {string} phone
+   * @param {string} summary
+   */
+  async updateCallerSummary(phone, summary) {
+    try {
+      await this.pool.query(
+        'UPDATE callers SET summary = $1 WHERE phone = $2',
+        [summary, phone]
+      );
+    } catch (err) {
+      console.error(`❌ Database error (updateCallerSummary): ${err.message}`);
     }
   }
 

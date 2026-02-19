@@ -168,7 +168,7 @@ class TelegramService {
    * @param {string|number} [chatId] - Telegram chat ID; falls back to TELEGRAM_CHAT_ID
    * @returns {Promise<object>} { success, summary, messageId }
    */
-  async sendVoicemailSummary(messages, callerPhone, durationSecs, chatId = null) {
+  async sendVoicemailSummary(messages, callerPhone, durationSecs, chatId = null, previousSummary = null) {
     this._requireConfig();
 
     if (!Array.isArray(messages) || messages.length === 0) {
@@ -179,11 +179,20 @@ class TelegramService {
       .map(m => `${(m.role || 'unknown').toUpperCase()}: ${m.content || ''}`)
       .join('\n');
 
+    const priorContext = previousSummary
+      ? `PRIOR HISTORY WITH THIS CALLER:\n${previousSummary}\n\nNEW CALL TRANSCRIPT:`
+      : 'CALL TRANSCRIPT:';
+
     const response = await chat([
       {
         role: 'system',
         content:
           'You are summarizing a voicemail call handled by an AI assistant. ' +
+          (previousSummary
+            ? 'You have been given prior history with this caller AND a new call transcript. ' +
+              'Produce ONE updated rolling summary that merges everything. ' +
+              'Replace outdated info with new info. Keep it under 150 words total. '
+            : '') +
           'Extract and present ONLY the following in plain text (no markdown symbols): ' +
           '1) Caller name (if given, otherwise "Unknown"). ' +
           '2) Reason for calling / message left. ' +
@@ -191,11 +200,11 @@ class TelegramService {
           '4) Urgency level: Low / Medium / High. ' +
           '5) One-line recommended action for Aston. ' +
           'If the call was spam, robocall, or bot and was hung up immediately, just say "SPAM/BOT — call ended immediately." ' +
-          'Keep the whole summary under 120 words.'
+          'Keep the whole summary under 150 words.'
       },
       {
         role: 'user',
-        content: `Call transcript:\n\n${transcript}`
+        content: `${priorContext}\n\n${transcript}`
       }
     ]);
 
