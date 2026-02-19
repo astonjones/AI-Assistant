@@ -72,6 +72,7 @@ wss.on('connection', (ws, req) => {
   let streamSid = null;
   let openaiSession = null;
   let audioCommitTimer = null;
+  let pendingAudioChunks = 0; // guard: only commit when audio was actually appended
   const COMMIT_INTERVAL = 500; // Commit audio buffer every 500ms
 
   ws.on('message', async (data) => {
@@ -131,6 +132,9 @@ wss.on('connection', (ws, req) => {
         const systemPrompt =
 `You are Maya, a professional and friendly AI assistant answering missed calls on behalf of Aston.
 Aston is unavailable — you are here to take a message and pass it on.
+
+LANGUAGE:
+Always respond in English only, regardless of what language the caller speaks.
 
 OPENING:
 As soon as the session starts you will be prompted to speak first.
@@ -206,13 +210,19 @@ TIME LIMIT:
             // Forward to OpenAI Realtime API
             if (openaiSession && openaiSession.isConnected) {
               realtimeService.sendAudioToOpenAI(callSid, audioPayload);
-              
-              // Clear existing timer and set new one to commit audio after short delay
+              pendingAudioChunks++;
+
+              // Debounce: commit the audio buffer after a short idle gap.
+              // Only fires if audio was actually appended (avoids the
+              // "buffer too small" error caused by silent Twilio packets).
               if (audioCommitTimer) {
                 clearTimeout(audioCommitTimer);
               }
               audioCommitTimer = setTimeout(() => {
-                realtimeService.commitAudioBuffer(callSid);
+                if (pendingAudioChunks > 0) {
+                  realtimeService.commitAudioBuffer(callSid);
+                  pendingAudioChunks = 0;
+                }
               }, COMMIT_INTERVAL);
             }
           }

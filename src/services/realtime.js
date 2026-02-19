@@ -70,11 +70,12 @@ class RealtimeService extends EventEmitter {
           session: {
             modalities: ['text', 'audio'],
             instructions: systemPrompt || this._getDefaultSystemPrompt(),
-            voice: 'alloy',
+            voice: 'shimmer',
             input_audio_format: 'g711_ulaw',
             output_audio_format: 'g711_ulaw',
             input_audio_transcription: {
-              model: 'whisper-1'
+              model: 'whisper-1',
+              language: 'en'  // force English transcription; prevents Whisper auto-detecting Spanish/German
             },
             tools: toolsService.getTools()
           }
