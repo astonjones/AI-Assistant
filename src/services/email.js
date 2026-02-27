@@ -131,6 +131,88 @@ class EmailService {
   }
 
   /**
+   * Fetch unread emails matching a Gmail search query (full, untruncated body).
+   * Also captures Reply-To header so replies land in the right inbox.
+   * @param {string} gmailQuery - Gmail search query (e.g. 'from:@convo.zillow.com is:unread')
+   * @param {number} limit - Max results
+   * @returns {Promise<Array>} Emails with id, from, replyTo, subject, body, date, gmailMessageId
+   */
+  async getUnreadEmailsFromQuery(gmailQuery, limit = 10) {
+    if (!this.isConfigured()) {
+      throw new Error('Gmail not configured. Add GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN to .env');
+    }
+
+    try {
+      const res = await this.gmail.users.messages.list({
+        userId: 'me',
+        maxResults: limit,
+        q: gmailQuery
+      });
+
+      const messages = res.data.messages || [];
+      const emails = [];
+
+      // Recursively extract plain-text body from MIME parts
+      const extractBody = (parts) => {
+        for (const part of parts || []) {
+          if (part.mimeType === 'text/plain' && part.body?.data) {
+            return Buffer.from(part.body.data, 'base64').toString('utf-8');
+          }
+          if (part.parts) {
+            const nested = extractBody(part.parts);
+            if (nested) return nested;
+          }
+        }
+        return '';
+      };
+
+      for (const msg of messages) {
+        const fullMsg = await this.gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id,
+          format: 'full'
+        });
+
+        const headers = fullMsg.data.payload.headers;
+        const subject   = headers.find(h => h.name === 'Subject')?.value    || '(no subject)';
+        const from      = headers.find(h => h.name === 'From')?.value       || '(unknown)';
+        const replyTo   = headers.find(h => h.name === 'Reply-To')?.value   || from;
+        const date      = headers.find(h => h.name === 'Date')?.value       || '';
+
+        let body = '';
+        if (fullMsg.data.payload.parts) {
+          body = extractBody(fullMsg.data.payload.parts);
+        } else if (fullMsg.data.payload.body?.data) {
+          body = Buffer.from(fullMsg.data.payload.body.data, 'base64').toString('utf-8');
+        }
+
+        emails.push({ id: msg.id, from, replyTo, subject, body, date });
+      }
+
+      return emails;
+    } catch (err) {
+      throw new Error(`Failed to fetch emails: ${err.message}`);
+    }
+  }
+
+  /**
+   * Mark a Gmail message as read by removing the UNREAD label.
+   * @param {string} messageId - Gmail message ID
+   */
+  async markAsRead(messageId) {
+    if (!this.isConfigured()) return;
+    try {
+      await this.gmail.users.messages.modify({
+        userId: 'me',
+        id: messageId,
+        requestBody: { removeLabelIds: ['UNREAD'] }
+      });
+    } catch (err) {
+      console.warn(`⚠️  Could not mark email ${messageId} as read: ${err.message}`);
+    }
+  }
+
+  /**
    * Get email details by ID
    * @param {string} messageId - Gmail message ID
    * @returns {Promise<object>} Email details

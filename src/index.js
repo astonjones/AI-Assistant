@@ -10,6 +10,7 @@ const voiceRoutes = require('./routes/voice');
 const smsRoutes = require('./routes/sms');
 const webhookRoutes = require('./routes/webhooks');
 const databaseRoutes = require('./routes/database');
+const contactRoutes = require('./routes/contact');
 const twilioService = require('./services/twilio');
 const realtimeService = require('./services/realtime');
 const telegramService = require('./services/telegram');
@@ -27,6 +28,7 @@ app.use('/voice', voiceRoutes);
 app.use('/sms', smsRoutes);
 app.use('/webhooks', webhookRoutes);
 app.use('/database', databaseRoutes);
+app.use('/contact', contactRoutes);
 
 // Create HTTP server to support WebSocket
 const server = http.createServer(app);
@@ -406,7 +408,7 @@ wss.on('error', (err) => {
 (async () => {
   await dbService.ensureReady();
   console.log('✅ Database initialized and ready');
-  
+
   server.listen(process.env.PORT || 3000, () => {
     const publicUrl = process.env.NGROK_URL;
     if (publicUrl) {
@@ -414,4 +416,27 @@ wss.on('error', (err) => {
     }
     console.log(`📱 Voice stream endpoint: ${publicUrl || 'http://localhost:3000'}/voice/stream`);
   });
+
+  // ── Zillow email polling ──────────────────────────────────
+  const emailService = require('./services/email');
+  const { pollZillowEmails } = require('./services/emailProcessor');
+
+  if (emailService.isConfigured()) {
+    // Default: poll every 5 minutes. Override with ZILLOW_POLL_INTERVAL_MS in .env
+    const intervalMs = parseInt(process.env.ZILLOW_POLL_INTERVAL_MS) || 5 * 60 * 1000;
+    console.log(`📧 Zillow email poller started (interval: ${intervalMs / 1000}s)`);
+
+    // Run once immediately at startup, then on the interval
+    pollZillowEmails()
+      .then(n => n > 0 && console.log(`📧 Zillow poll: processed ${n} lead(s) on startup`))
+      .catch(err => console.error('📧 Zillow poll error (startup):', err.message));
+
+    setInterval(() => {
+      pollZillowEmails()
+        .then(n => n > 0 && console.log(`📧 Zillow poll: processed ${n} lead(s)`))
+        .catch(err => console.error('📧 Zillow poll error:', err.message));
+    }, intervalMs);
+  } else {
+    console.log('📧 Gmail not configured — Zillow email polling disabled');
+  }
 })();

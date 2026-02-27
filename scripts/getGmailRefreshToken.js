@@ -138,15 +138,6 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-// Open browser
-if (process.platform === 'win32') {
-  require('child_process').exec(`start ${authUrl}`);
-} else if (process.platform === 'darwin') {
-  require('child_process').exec(`open ${authUrl}`);
-} else {
-  require('child_process').exec(`xdg-open ${authUrl}`);
-}
-
 // Timeout after 5 minutes
 setTimeout(() => {
   console.error('\n⏱️  Timeout: No callback received after 5 minutes.');

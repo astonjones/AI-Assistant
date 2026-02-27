@@ -1,3 +1,5 @@
+## 1.0.1 - Added frontend endpoints
+- Added frontend to the monorepo - added some frontend routes.
 
 ## 1.0.0 - MVP
 - Voicemail Replacement - Screen spam calls. Has database to remember previous conversations.

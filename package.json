@@ -1,11 +1,12 @@
 {
   "name": "ai-agent-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Express API that forwards requests to OpenAI chat completions",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "frontend": "cd ./frontend && npm run dev",
     "get-google-refresh-token": "node scripts/getGmailRefreshToken.js"
   },
   "dependencies": {
