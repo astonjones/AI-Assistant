@@ -1,3 +1,6 @@
+# 1.0.2 - Editted prompt for assistant work
+- Editted gpt prompt.
+
 ## 1.0.1 - Added frontend endpoints
 - Added frontend to the monorepo - added some frontend routes.
 
