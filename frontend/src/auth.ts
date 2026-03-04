@@ -2,12 +2,25 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+const hasGoogle = Boolean(googleClientId && googleClientSecret);
+
+if (process.env.NODE_ENV !== "production") {
+  console.log("[auth] API_URL:", process.env.API_URL);
+  console.log("[auth] Google OAuth enabled:", hasGoogle);
+}
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
-    Google({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
+    ...(hasGoogle
+      ? [
+          Google({
+            clientId: googleClientId!,
+            clientSecret: googleClientSecret!,
+          }),
+        ]
+      : []),
 
     Credentials({
       name: "Credentials",
